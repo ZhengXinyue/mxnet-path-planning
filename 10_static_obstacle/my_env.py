@@ -163,19 +163,17 @@ class envmodel():
         if self.d_last >= self.d:
             reward = reward + 0.1 * (self.d_last - self.d)
 
-        # 速度发生变化就会有负的奖励
-        reward = reward - 0.01 * (abs(self.w_last - self.cmd[1]) + abs(self.v_last - self.cmd[0]))
 
         # 到达目标点有正的奖励
         if self.d < self.dis:
-            reward = reward + 20
+            reward = reward + 1
             print("Goal point!!!!!!!!!!!!!!!!!!!!")
 
         # 碰撞障碍物有负的奖励
         for i in range(self.num_obs):
             if math.sqrt((self.robotstate[0] - self.obs_pos[i][0]) ** 2 + (
                     self.robotstate[1] - self.obs_pos[i][1]) ** 2) < 1.5:
-                reward = reward - 1
+                reward = reward - 0.5
                 print("Obstacle!!!!!")
                 break
 

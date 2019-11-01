@@ -338,7 +338,7 @@ def get_initial_coordinate():
     while True:
         start_end_point = 2 * d * np.random.random_sample((2, 2)) - d     # (-1, 1) * d
         if math.sqrt((start_end_point[0][0] - start_end_point[1][0]) ** 2 +
-                     (start_end_point[0][1] - start_end_point[1][1]) ** 2) > 10:
+                     (start_end_point[0][1] - start_end_point[1][1]) ** 2) > 5:
             break
     return start_end_point
 
@@ -348,10 +348,10 @@ os.mkdir(time)
 load_model_path1 = '2019-10-31 16:18:34/final main network parameters'
 load_model_path2 = '2019-10-31 16:18:34/final target network parameters'
 # agent.load_model()
-
-d = 10     # the distance from start point to goal point
+target_reward = 1
+d = 5     # the distance from start point to goal point
 max_episode_steps = 200
-max_episodes = 500
+max_episodes = 300
 
 for episode in range(max_episodes):
     agent.episode = episode
@@ -440,7 +440,7 @@ for episode in range(max_episodes):
                 agent.hard_replace()
 
         episode_reward += reward
-        if episode_reward > 1:         # attention
+        if episode_reward > target_reward:         # attention
             success_times += 1
         episode_steps += 1
 
