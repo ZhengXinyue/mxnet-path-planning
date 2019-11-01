@@ -3,7 +3,7 @@
 
 # 环境模型：env_0_obstacle .py
 # launch文件：one_jackal_image_add_sensor.launch
-# world文件：empty_sensor.world
+# world文件：obstacle_sensor.world
 
 
 import os
