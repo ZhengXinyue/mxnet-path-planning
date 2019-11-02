@@ -26,10 +26,6 @@ from my_env import envmodel
 
 env = envmodel()
 ctx = mx.gpu()
-seed = 1
-random.seed(seed)
-np.random.seed(seed)
-mx.random.seed(seed)
 
 
 # (v, w)
@@ -46,19 +42,21 @@ class Dueling_network(gluon.nn.Block):
         self.conv0 = nn.Conv2D(32, kernel_size=8, strides=4, padding=2, activation='relu')
         self.conv1 = nn.Conv2D(64, kernel_size=4, strides=2, padding=1, activation='relu')
         self.conv2 = nn.Conv2D(64, kernel_size=3, strides=1, padding=1, activation='relu')
-        self.a_dense0 = nn.Dense(512, activation='relu')
-        self.a_dense1 = nn.Dense(self.n_actions)
-        self.v_dense0 = nn.Dense(512, activation='relu')
-        self.v_dense1 = nn.Dense(1)
+        self.a_dense0 = nn.Dense(1024, activation='relu')
+        self.a_dense1 = nn.Dense(512, activation='relu')
+        self.a_dense2 = nn.Dense(self.n_actions)
+        self.v_dense0 = nn.Dense(1024, activation='relu')
+        self.v_dense1 = nn.Dense(512, activation='relu')
+        self.v_dense2 = nn.Dense(1)
 
     def forward(self, visual, self_state):
         feature = nd.flatten(self.conv2(self.conv1(self.conv0(visual))))
         # 2896 + 6400
         input = nd.concat(feature, self_state, dim=1)
         # batch_size x n_actions
-        a_value = self.a_dense1(self.a_dense0(input))
+        a_value = self.a_dense2(self.a_dense1(self.a_dense0(input)))
         # batch_size x 1
-        v_value = self.v_dense1(self.v_dense0(input))
+        v_value = self.v_dense2(self.v_dense1(self.v_dense0(input)))
         # batch_size x 1
         mean_value = (nd.sum(a_value, axis=1) / self.n_actions).reshape((visual.shape[0], 1))
         # broadcast
@@ -310,10 +308,15 @@ class D3QN_PER:
 
     def load_model(self):
         self.load = 1
+        self.annealing_end = 1
         self.main_network.load_parameters(load_model_path1)
         self.target_network.load_parameters(load_model_path2)
 
 
+seed = 1
+random.seed(seed)
+np.random.seed(seed)
+mx.random.seed(seed)
 episode = 0
 episode_reward_list = []
 cmd = [0.0, 0.0]    # command for navigate (v, w)
@@ -338,19 +341,19 @@ def get_initial_coordinate():
     while True:
         start_end_point = 2 * d * np.random.random_sample((2, 2)) - d     # (-1, 1) * d
         if math.sqrt((start_end_point[0][0] - start_end_point[1][0]) ** 2 +
-                     (start_end_point[0][1] - start_end_point[1][1]) ** 2) > 5:
+                     (start_end_point[0][1] - start_end_point[1][1]) ** 2) > 20:
             break
     return start_end_point
 
 
 time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
 os.mkdir(time)
-load_model_path1 = '2019-10-31 16:18:34/final main network parameters'
-load_model_path2 = '2019-10-31 16:18:34/final target network parameters'
-# agent.load_model()
+load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
+load_model_path2 = '2019-11-01 21:00:29/final target network parameters'
+agent.load_model()
 target_reward = 1
-d = 5     # the distance from start point to goal point
-max_episode_steps = 200
+d = 20    # the distance from start point to goal point
+max_episode_steps = 300
 max_episodes = 300
 
 for episode in range(max_episodes):

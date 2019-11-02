@@ -195,10 +195,10 @@ class envmodel():
             flag = True  # 用于判断起点和终点是否在障碍物的范围内
             for i in range(self.num_obs):
                 # 如果起点在障碍物周围5.0m的范围内则需要重新生成障碍物
-                if math.sqrt((self.sp[0] - self.obs_pos[i][0]) ** 2 + (self.sp[1] - self.obs_pos[i][1]) ** 2) < 5.0:
+                if math.sqrt((self.sp[0] - self.obs_pos[i][0]) ** 2 + (self.sp[1] - self.obs_pos[i][1]) ** 2) < 3.0:
                     flag = False
                 # 如果终点在障碍物周围5.0m的范围内则需要重新生成障碍物
-                if math.sqrt((self.gp[0] - self.obs_pos[i][0]) ** 2 + (self.gp[1] - self.obs_pos[i][1]) ** 2) < 5.0:
+                if math.sqrt((self.gp[0] - self.obs_pos[i][0]) ** 2 + (self.gp[1] - self.obs_pos[i][1]) ** 2) < 3.0:
                     flag = False
                 # 如果两个障碍相隔太近则需要重新生成障碍物
                 for j in range(i + 1, self.num_obs):
