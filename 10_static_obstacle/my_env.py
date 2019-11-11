@@ -203,7 +203,7 @@ class envmodel():
                 # 如果两个障碍相隔太近则需要重新生成障碍物
                 for j in range(i + 1, self.num_obs):
                     if math.sqrt((self.obs_pos[i][0] - self.obs_pos[j][0]) ** 2 + (
-                            self.obs_pos[i][1] - self.obs_pos[j][1]) ** 2) < 5.0:
+                            self.obs_pos[i][1] - self.obs_pos[j][1]) ** 2) < 3.0:
                         flag = False
             if flag == True:
                 break

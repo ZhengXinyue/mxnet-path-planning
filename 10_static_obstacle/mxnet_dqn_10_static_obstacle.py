@@ -323,14 +323,14 @@ cmd = [0.0, 0.0]    # command for navigate (v, w)
 initialized = False
 success_times = 0
 agent = D3QN_PER(n_actions=len(action_dict),
-                 explore_steps=0,
+                 explore_steps=10000,
                  clip_theta=10,
                  learning_rate=0.0005,
                  init_epsilon=1,
                  final_epsilon=0.05,
                  gamma=0.99,
                  buffer_size=5000,
-                 batch_size=32,
+                 batch_size=64,
                  replace_iter=500,
                  annealing_end=10000,
                  tau=0.001,
@@ -341,7 +341,7 @@ def get_initial_coordinate():
     while True:
         start_end_point = 2 * d * np.random.random_sample((2, 2)) - d     # (-1, 1) * d
         if math.sqrt((start_end_point[0][0] - start_end_point[1][0]) ** 2 +
-                     (start_end_point[0][1] - start_end_point[1][1]) ** 2) > 20:
+                     (start_end_point[0][1] - start_end_point[1][1]) ** 2) > 5:
             break
     return start_end_point
 
@@ -350,11 +350,11 @@ time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
 os.mkdir(time)
 load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
 load_model_path2 = '2019-11-01 21:00:29/final target network parameters'
-agent.load_model()
+# agent.load_model()
 target_reward = 1
-d = 20    # the distance from start point to goal point
-max_episode_steps = 300
-max_episodes = 300
+d = 15    # the distance from start point to goal point
+max_episode_steps = 200
+max_episodes = 500
 
 for episode in range(max_episodes):
     agent.episode = episode
