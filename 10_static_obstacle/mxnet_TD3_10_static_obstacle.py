@@ -42,12 +42,21 @@ class MemoryBuffer:
     def sample(self, batch_size):
         assert len(self.buffer) > batch_size
         minibatch = random.sample(self.buffer, batch_size)
-        state_batch = nd.array([data[0] for data in minibatch], ctx=self.ctx)
-        action_batch = nd.array([data[1] for data in minibatch], ctx=self.ctx)
-        reward_batch = nd.array([data[2] for data in minibatch], ctx=self.ctx)
-        next_state_batch = nd.array([data[3] for data in minibatch], ctx=self.ctx)
-        done = nd.array([data[4] for data in minibatch], ctx=self.ctx)
-        return state_batch, action_batch, reward_batch, next_state_batch, done
+        # batch size x 4 x 80 x 80
+        visual_state_batch = nd.array([data[0] for data in minibatch], ctx=self.ctx)
+        # batch size x 2896
+        lidar_self_state_batch = nd.array([data[1] for data in minibatch], ctx=self.ctx).flatten()
+
+        action_batch = nd.array([data[2] for data in minibatch], ctx=self.ctx)
+        reward_batch = nd.array([data[3] for data in minibatch], ctx=self.ctx)
+
+        next_visual_state_batch = nd.array([data[4] for data in minibatch], ctx=self.ctx)
+        next_lidar_self_state_batch = nd.array([data[5] for data in minibatch], ctx=self.ctx).flatten()
+
+        done_batch = nd.array([data[6] for data in minibatch], ctx=self.ctx)
+
+        return visual_state_batch, lidar_self_state_batch, action_batch, reward_batch, \
+               next_visual_state_batch, next_lidar_self_state_batch, done_batch
 
     def store_transition(self, state, action, reward, next_state, done):
         transition = (state, action, reward, next_state, done)
@@ -291,12 +300,11 @@ np.random.seed(seed)
 mx.random.seed(seed)
 episode = 0
 episode_reward_list = []
-cmd = [0.0, 0.0]    # command for navigate (v, w)
 time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
 mode = 'train'
 d = 15    # the distance from start point to goal point
 max_episode_steps = 300
-max_episodes = 500
+max_episodes = 300
 target_reward = 1
 agent = TD3(action_dim=2,
             action_bound=[[-1, 1], [-1, 1]],
@@ -306,7 +314,7 @@ agent = TD3(action_dim=2,
             memory_size=100000,
             gamma=0.99,
             tau=0.005,
-            explore_steps=1000,
+            explore_steps=10000,
             policy_update=2,
             policy_noise=0.2,
             explore_noise=0.1,
@@ -336,14 +344,14 @@ for episode in range(1, max_episodes+1):
 
         # lidar_state: 724 np.array
         lidar_self = np.array(env_info[0])
-        # get lidar information or self state information using slice
+        # get lidar information or self state information using slice -----------------------
         # 1x724 np.array
         lidar_self = lidar_self[:][np.newaxis, :]
 
         # visual: 1x80x80 np.array
         visual = (env_info[1][np.newaxis, :] - (255 / 2)) / (255 / 2)
 
-        terminal, reward = env_info[2], env_info[3]
+        done, reward = env_info[2], env_info[3]
 
         # initialize the first state
         for i in range(4):
@@ -358,27 +366,140 @@ for episode in range(1, max_episodes+1):
         # 1x2896 np.array
         lidar_self_state = lidar_self_state.reshape(1, -1)
 
-        # initialize the network parameters with one forward
-        m = nd.array([visual_state], ctx=ctx)
-        n = nd.array([lidar_self_state], ctx=ctx).flatten()
-        action = agent.main_actor_network(m, n)
-        agent.target_actor_network(m, n)
-
-
-
-        episode_steps += 1
-
         while True:
             if agent.total_steps < agent.explore_steps:
+                v_cmd = random.uniform(-1, 1)
+                w_cmd = random.uniform(-1, 1)
+                action = [v_cmd, w_cmd]
+                agent.total_steps += 1
+                episode_steps += 1
+            else:
+                action = agent.choose_action_train(visual_state, lidar_self_state)
+                v_cmd = float(action[0][0].asnumpy())
+                w_cmd = float(action[0][1].asnumpy())
+                action = [v_cmd, w_cmd]
 
+            env.step(action)
+            env_info = env.get_env()
+            lidar_self, visual, done, reward = env_info[0], env_info[1], env_info[2], env_info[3]
+            episode_reward += reward
 
+            # lidar information and self state information   using slice --------------------------------
+            lidar_self = np.array(lidar_self)
+            lidar_self = lidar_self[:][np.newaxis, :]
 
+            visual = (visual[np.newaxis, :] - (255 / 2)) / (255 / 2)
+            state_deque.append(lidar_self)
+            visual_deque.append(visual)
+
+            next_visual_state = np.concatenate((visual_deque[0], visual_deque[1], visual_deque[2], visual_deque[3]),
+                                               axis=0)
+            next_lidar_self_state = np.concatenate((state_deque[0], state_deque[1], state_deque[2], state_deque[3]),
+                                                   axis=0)
+            next_lidar_self_state = next_lidar_self_state.reshape(1, -1)
+
+            transition = (visual_state, lidar_self_state,
+                          action, reward,
+                          next_visual_state, next_lidar_self_state,
+                          done)
+            agent.memory_buffer.store_transition(transition)
+
+            visual_state, lidar_self_state = next_visual_state, next_lidar_self_state
+            if agent.total_steps >= agent.explore_steps:
+                agent.update()
+            if done:
+                break
+            if episode_steps >= 300:
+                break
+        if episode_reward > target_reward:
+            success_times += 1
+        episode_reward_list.append(episode_reward)
+        print('episode %d ends with reward %f' % (episode, episode_reward))
 
     elif mode == 'test':
         load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
         load_model_path2 = '2019-11-01 21:00:29/final target network parameters'
         # agent.load_model()
+        # os.mkdir(time)
 
+        # use deque to stack
+        state_deque = deque(maxlen=4)
+        visual_deque = deque(maxlen=4)
+
+        episode_steps = 0
+        episode_reward = 0
+        start_end_point = get_initial_coordinate()
+        env.reset_env(start=[start_end_point[0][0], start_end_point[0][1]],
+                      goal=[0, 0])
+        # env.reset_env(start=[start_end_point[0][0], start_end_point[0][1]],
+        # goal=[start_end_point[1][0], start_end_point[1][1]])
+
+        env_info = env.get_env()
+
+        # lidar_state: 724 np.array
+        lidar_self = np.array(env_info[0])
+        # get lidar information or self state information using slice -----------------------
+        # 1x724 np.array
+        lidar_self = lidar_self[:][np.newaxis, :]
+
+        # visual: 1x80x80 np.array
+        visual = (env_info[1][np.newaxis, :] - (255 / 2)) / (255 / 2)
+
+        done, reward = env_info[2], env_info[3]
+
+        # initialize the first state
+        for i in range(4):
+            visual_deque.append(visual)
+        # 4x80x80  np.array
+        visual_state = np.concatenate((visual_deque[0], visual_deque[1], visual_deque[2], visual_deque[3]), axis=0)
+
+        for i in range(4):
+            state_deque.append(lidar_self)
+        # 4x724  np.array
+        lidar_self_state = np.concatenate((state_deque[0], state_deque[1], state_deque[2], state_deque[3]), axis=0)
+        # 1x2896 np.array
+        lidar_self_state = lidar_self_state.reshape(1, -1)
+
+        while True:
+            action = agent.choose_action_evaluate(visual_state, lidar_self_state)
+            v_cmd = float(action[0][0].asnumpy())
+            w_cmd = float(action[0][1].asnumpy())
+            action = [v_cmd, w_cmd]
+
+            env.step(action)
+            env_info = env.get_env()
+            lidar_self, visual, done, reward = env_info[0], env_info[1], env_info[2], env_info[3]
+            episode_reward += reward
+
+            # lidar information and self state information   using slice --------------------------------
+            lidar_self = np.array(lidar_self)
+            lidar_self = lidar_self[:][np.newaxis, :]
+
+            visual = (visual[np.newaxis, :] - (255 / 2)) / (255 / 2)
+            state_deque.append(lidar_self)
+            visual_deque.append(visual)
+
+            next_visual_state = np.concatenate((visual_deque[0], visual_deque[1], visual_deque[2], visual_deque[3]),
+                                               axis=0)
+            next_lidar_self_state = np.concatenate((state_deque[0], state_deque[1], state_deque[2], state_deque[3]),
+                                                   axis=0)
+            next_lidar_self_state = next_lidar_self_state.reshape(1, -1)
+
+            visual_state, lidar_self_state = next_visual_state, next_lidar_self_state
+            if done:
+                break
+            if episode_steps >= 300:
+                break
+        if episode_reward > target_reward:
+            success_times += 1
+        episode_reward_list.append(episode_reward)
+        print('episode %d ends with reward %f' % (episode, episode_reward))
+
+
+plt.plot(episode_reward_list)
+plt.xlabel('episode')
+plt.ylabel('reward')
+plt.savefig('%s/reward' % time)
 
 
 
