@@ -46,20 +46,21 @@ class MemoryBuffer:
         visual_state_batch = nd.array([data[0] for data in minibatch], ctx=self.ctx)
         # batch size x 2896
         lidar_self_state_batch = nd.array([data[1] for data in minibatch], ctx=self.ctx).flatten()
-
+        # batch size x 2
         action_batch = nd.array([data[2] for data in minibatch], ctx=self.ctx)
+        # batch size
         reward_batch = nd.array([data[3] for data in minibatch], ctx=self.ctx)
-
+        # batch size x 4 x 80 x 80
         next_visual_state_batch = nd.array([data[4] for data in minibatch], ctx=self.ctx)
+        # batch size x 2896
         next_lidar_self_state_batch = nd.array([data[5] for data in minibatch], ctx=self.ctx).flatten()
-
+        # batch size
         done_batch = nd.array([data[6] for data in minibatch], ctx=self.ctx)
 
         return visual_state_batch, lidar_self_state_batch, action_batch, reward_batch, \
                next_visual_state_batch, next_lidar_self_state_batch, done_batch
 
-    def store_transition(self, state, action, reward, next_state, done):
-        transition = (state, action, reward, next_state, done)
+    def store_transition(self, transition):
         self.buffer.append(transition)
 
 
@@ -74,12 +75,19 @@ class Actor(nn.Block):
         self.conv2 = nn.Conv2D(64, kernel_size=3, strides=1, padding=1, activation='relu')
         self.dense0 = nn.Dense(512, activation='relu')
         self.dense1 = nn.Dense(128, activation='relu')
-        self.dense2 = nn.Dense(self.action_dim, activation='tanh')
+        self.v_dense = nn.Dense(1, activation='sigmoid')
+        self.w_dense = nn.Dense(1, activation='tanh')
 
     def forward(self, visual, lidar):
+        visual = visual / 255
+        # batch size x 6400
         visual_feature = self.conv2(self.conv1(self.conv0(visual))).flatten()
+        # batch size x (6400 + 724 x 4)
         dense_input = nd.concat(visual_feature, lidar, dim=1)
-        action = self.dense2(self.dense1(self.dense0(dense_input)))
+        m = self.dense1(self.dense0(dense_input))
+        v_action = self.v_dense(m)
+        w_action = self.w_dense(m)
+        action = nd.concat(v_action, w_action, dim=1)
         upper_bound = self.action_bound[:, 1]
         action = action * upper_bound
         return action
@@ -97,7 +105,9 @@ class Critic(nn.Block):
         self.dense2 = nn.Dense(1)
 
     def forward(self, visual, lidar, action):
+        visual = visual / 255
         visual_feature = self.conv2(self.conv1(self.conv0(visual))).flatten()
+        # batch size x (6400 + 724 x 4 + 2)
         dense_input = nd.concat(visual_feature, lidar, action, dim=1)
         q_value = self.dense2(self.dense1(self.dense0(dense_input)))
         return q_value
@@ -118,6 +128,7 @@ class TD3:
                  policy_noise,
                  explore_noise,
                  noise_clip,
+                 grad_clip,
                  ctx):
         self.action_dim = action_dim
         self.action_bound = nd.array(action_bound, ctx=ctx)
@@ -134,6 +145,8 @@ class TD3:
         self.explore_noise = explore_noise
         self.noise_clip = noise_clip
         self.ctx = ctx
+        self.grad_clip = grad_clip
+        self.load = 0
 
         self.main_actor_network = Actor(action_dim, self.action_bound)
         self.target_actor_network = Actor(action_dim, self.action_bound)
@@ -161,6 +174,7 @@ class TD3:
 
         self.total_steps = 0
         self.total_train_steps = 0
+        self.episode = 0
 
         self.memory_buffer = MemoryBuffer(buffer_size=self.memory_size, ctx=ctx)
 
@@ -172,7 +186,6 @@ class TD3:
         noise = nd.normal(loc=0, scale=self.explore_noise, shape=action.shape, ctx=self.ctx)
         action += noise
         clipped_action = self.action_clip(action).squeeze()
-        self.total_steps += 1
         return clipped_action
 
     def choose_action_evaluate(self, visual, lidar):
@@ -182,17 +195,9 @@ class TD3:
         return action
 
     def action_clip(self, action):
-        n = len(self.action_bound)
-        action_list = []
-        for i in range(n):
-            action = nd.clip(action[:, i],
-                             a_min=float(self.action_bound[i][0].asnumpy()),
-                             a_max=float(self.action_bound[i][1].asnumpy()))
-            action_list.append(action.reshape(-1, 1))
-        if len(action_list) == 1:
-            return action_list[0]
-        else:
-            clipped_action = nd.concat(action_list[0].reshape(-1, 1), action_list[1].reshape(-1, 1))
+        action0 = nd.clip(action[:, 0], a_min=float(self.action_bound[0][0].asnumpy()), a_max=float(self.action_bound[0][1].asnumpy()))
+        action1 = nd.clip(action[:, 1], a_min=float(self.action_bound[1][0].asnumpy()), a_max=float(self.action_bound[1][1].asnumpy()))
+        clipped_action = nd.concat(action0.reshape(-1, 1), action1.reshape(-1, 1))
         return clipped_action
 
     def soft_update(self, target_network, main_network):
@@ -206,12 +211,13 @@ class TD3:
 
     def update(self):
         self.total_train_steps += 1
-        state_batch, action_batch, reward_batch, next_state_batch, done = self.memory_buffer.sample(self.batch_size)
+        visual_state_batch, lidar_self_state_batch, action_batch, reward_batch, \
+        next_visual_state_batch, next_lidar_self_state_batch, done_batch = self.memory_buffer.sample(self.batch_size)
 
         # --------------optimize the critic network--------------------
         with autograd.record():
             # choose next action according to target policy network
-            next_action_batch = self.target_actor_network(next_state_batch)
+            next_action_batch = self.target_actor_network(next_visual_state_batch, next_lidar_self_state_batch)
             noise = nd.normal(loc=0, scale=self.policy_noise, shape=next_action_batch.shape, ctx=self.ctx)
             # with noise clip
             noise = nd.clip(noise, a_min=-self.noise_clip, a_max=self.noise_clip)
@@ -219,35 +225,39 @@ class TD3:
             clipped_action = self.action_clip(next_action_batch)
 
             # get target q value
-            target_q_value1 = self.target_critic_network1(next_state_batch, clipped_action)
-            target_q_value2 = self.target_critic_network2(next_state_batch, clipped_action)
+            target_q_value1 = self.target_critic_network1(next_visual_state_batch, next_lidar_self_state_batch, clipped_action)
+            target_q_value2 = self.target_critic_network2(next_visual_state_batch, next_lidar_self_state_batch, clipped_action)
             target_q_value = nd.minimum(target_q_value1, target_q_value2).squeeze()
             target_q_value = reward_batch + (1.0 - done) * (self.gamma * target_q_value)
 
             # get current q value
-            current_q_value1 = self.main_critic_network1(state_batch, action_batch)
-            current_q_value2 = self.main_critic_network2(state_batch, action_batch)
+            current_q_value1 = self.main_critic_network1(visual_state_batch, lidar_self_state_batch, action_batch)
+            current_q_value2 = self.main_critic_network2(visual_state_batch, lidar_self_state_batch, action_batch)
             loss = gloss.L2Loss()
 
             value_loss1 = loss(current_q_value1, target_q_value.detach())
             value_loss2 = loss(current_q_value2, target_q_value.detach())
-
+            value_loss = value_loss1 + value_loss2
         self.main_critic_network1.collect_params().zero_grad()
-        value_loss1.backward()
-        self.critic1_optimizer.step(self.batch_size)
-
         self.main_critic_network2.collect_params().zero_grad()
-        value_loss2.backward()
+        value_loss.backward()
+        params1 = [p.data() for p in self.main_critic_network1.collect_params().values()]
+        gb.grad_clipping(params1, theta=self.grad_clip, ctx=self.ctx)
+        params2 = [p.data() for p in self.main_critic_network2.collect_params().values()]
+        gb.grad_clipping(params2, theta=self.grad_clip, ctx=self.ctx)
+        self.critic1_optimizer.step(self.batch_size)
         self.critic2_optimizer.step(self.batch_size)
 
         # ---------------optimize the actor network-------------------------
         if self.total_train_steps % self.policy_update == 0:
             with autograd.record():
-                pred_action_batch = self.main_actor_network(state_batch)
-                actor_loss = -nd.mean(self.main_critic_network1(state_batch, pred_action_batch))
+                pred_action_batch = self.main_actor_network(visual_state_batch, lidar_self_state_batch)
+                actor_loss = -nd.mean(self.main_critic_network1(visual_state_batch, lidar_self_state_batch, pred_action_batch))
 
             self.main_actor_network.collect_params().zero_grad()
             actor_loss.backward()
+            params3 = [p.data() for p in self.main_actor_network.collect_params().values()]
+            gb.grad_clipping(params3, theta=self.grad_clip, ctx=self.ctx)
             self.actor_optimizer.step(1)
 
             self.soft_update(self.target_actor_network, self.main_actor_network)
@@ -256,31 +266,79 @@ class TD3:
 
     def save_model(self):
         self.main_actor_network.save_parameters(
-            '%s/main actor network parameters at episode %d' % (time, self.total_steps))
+            '%s/main actor network parameters at episode %d' % (time, self.episode))
         self.target_actor_network.save_parameters(
-            '%s/target actor network parameters at episode %d' % (time, self.total_steps))
+            '%s/target actor network parameters at episode %d' % (time, self.episode))
         self.main_critic_network1.save_parameters(
-            '%s/main critic network1 parameters at episode %d' % (time, self.total_steps))
+            '%s/main critic network1 parameters at episode %d' % (time, self.episode))
         self.main_critic_network2.save_parameters(
-            '%s/main critic network2 parameters at episode %d' % (time, self.total_steps))
+            '%s/main critic network2 parameters at episode %d' % (time, self.episode))
         self.target_critic_network1.save_parameters(
-            '%s/target critic network1 parameters at episode %d' % (time, self.total_steps))
+            '%s/target critic network1 parameters at episode %d' % (time, self.episode))
         self.target_critic_network2.save_parameters(
-            '%s/target critic network2 parameters at episode %d' % (time, self.total_steps))
+            '%s/target critic network2 parameters at episode %d' % (time, self.episode))
 
     def load_model(self):
+        self.load = 1
         self.main_actor_network.save_parameters(
-            '%s/main actor network parameters at episode %d' % (time, self.total_steps))
+            '%s/main actor network parameters at episode %d' % (time, self.episode))
         self.target_actor_network.save_parameters(
-            '%s/target actor network parameters at episode %d' % (time, self.total_steps))
+            '%s/target actor network parameters at episode %d' % (time, self.episode))
         self.main_critic_network1.save_parameters(
-            '%s/main critic network1 parameters at episode %d' % (time, self.total_steps))
+            '%s/main critic network1 parameters at episode %d' % (time, self.episode))
         self.main_critic_network2.save_parameters(
-            '%s/main critic network2 parameters at episode %d' % (time, self.total_steps))
+            '%s/main critic network2 parameters at episode %d' % (time, self.episode))
         self.target_critic_network1.save_parameters(
-            '%s/target critic network1 parameters at episode %d' % (time, self.total_steps))
+            '%s/target critic network1 parameters at episode %d' % (time, self.episode))
         self.target_critic_network2.save_parameters(
-            '%s/target critic network2 parameters at episode %d' % (time, self.total_steps))
+            '%s/target critic network2 parameters at episode %d' % (time, self.episode))
+
+
+def log_information():
+    with open('%s/training log.txt' % time, 'a+') as f:
+        f.write('if load model:   %d\n'
+                'model path:    %s\n'
+                'random seed:   %d\n'
+                'distance:   %d\n'
+                'total episodes:   %d\n'
+                'max episode steps:   %d\n'
+                'explore steps:   %d\n'
+                'actor learning rate:   %.5f\n'
+                'critic learning rate:    %.5f\n'
+                'gamma:   %.5f\n'
+                'memory size:   %d\n'
+                'batch size:   %d\n'
+                'tau:   %.5f\n'
+                'policy noise:   %.5f\n'
+                'explore noise:    %.5f\n'
+                'noise clip:     %.5f\n'
+                'grad clip:      %.2f\n'
+                'policy update:     %d\n'
+                'success times:   %d\n'
+                'frame stack:   %d\n' %
+                (agent.load,
+                 load_model_path1,
+                 seed,
+                 d,
+                 max_episodes,
+                 max_episode_steps,
+                 agent.explore_steps,
+                 agent.actor_learning_rate,
+                 agent.critic_learning_rate,
+                 agent.gamma,
+                 agent.memory_size,
+                 agent.batch_size,
+                 agent.tau,
+                 agent.policy_noise,
+                 agent.explore_noise,
+                 agent.noise_clip,
+                 agent.grad_clip,
+                 agent.policy_update,
+                 success_times,
+                 n_fram_stack))
+
+    with open('%s/test.txt' % time, 'a+') as f:
+        f.write('reward list:\n' + str(episode_reward_list) + '\n')
 
 
 def get_initial_coordinate():
@@ -294,37 +352,41 @@ def get_initial_coordinate():
 
 ctx = mx.gpu()
 success_times = 0
-seed = 1111
+seed = 11111
 random.seed(seed)
 np.random.seed(seed)
 mx.random.seed(seed)
 episode = 0
 episode_reward_list = []
 time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
+n_fram_stack = 4
 mode = 'train'
 d = 15    # the distance from start point to goal point
 max_episode_steps = 300
-max_episodes = 300
+max_episodes = 200
 target_reward = 1
 agent = TD3(action_dim=2,
-            action_bound=[[-1, 1], [-1, 1]],
-            actor_learning_rate=0.001,
-            critic_learning_rate=0.001,
+            action_bound=[[0, 1], [-1, 1]],
+            actor_learning_rate=0.0001,
+            critic_learning_rate=0.0001,
             batch_size=64,
             memory_size=100000,
             gamma=0.99,
             tau=0.005,
-            explore_steps=10000,
+            explore_steps=1000,
             policy_update=2,
             policy_noise=0.2,
-            explore_noise=0.1,
+            explore_noise=0.2,
             noise_clip=0.5,
+            grad_clip=1,
             ctx=ctx
             )
 
-for episode in range(1, max_episodes+1):
-    if mode == 'train':
-        # os.mkdir(time)
+
+if mode == 'train':
+    os.mkdir(time)
+    for episode in range(1, max_episodes+1):
+        agent.episode += 1
         if episode % 50 == 0:
             agent.save_model()
 
@@ -349,17 +411,17 @@ for episode in range(1, max_episodes+1):
         lidar_self = lidar_self[:][np.newaxis, :]
 
         # visual: 1x80x80 np.array
-        visual = (env_info[1][np.newaxis, :] - (255 / 2)) / (255 / 2)
+        visual = env_info[1][np.newaxis, :]
 
         done, reward = env_info[2], env_info[3]
 
         # initialize the first state
-        for i in range(4):
+        for i in range(n_fram_stack):
             visual_deque.append(visual)
         # 4x80x80  np.array
         visual_state = np.concatenate((visual_deque[0], visual_deque[1], visual_deque[2], visual_deque[3]), axis=0)
 
-        for i in range(4):
+        for i in range(n_fram_stack):
             state_deque.append(lidar_self)
         # 4x724  np.array
         lidar_self_state = np.concatenate((state_deque[0], state_deque[1], state_deque[2], state_deque[3]), axis=0)
@@ -368,16 +430,18 @@ for episode in range(1, max_episodes+1):
 
         while True:
             if agent.total_steps < agent.explore_steps:
-                v_cmd = random.uniform(-1, 1)
+                v_cmd = random.uniform(0, 1)
                 w_cmd = random.uniform(-1, 1)
                 action = [v_cmd, w_cmd]
                 agent.total_steps += 1
                 episode_steps += 1
             else:
                 action = agent.choose_action_train(visual_state, lidar_self_state)
-                v_cmd = float(action[0][0].asnumpy())
-                w_cmd = float(action[0][1].asnumpy())
+                v_cmd = float(action[0].asnumpy())
+                w_cmd = float(action[1].asnumpy())
                 action = [v_cmd, w_cmd]
+                agent.total_steps += 1
+                episode_steps += 1
 
             env.step(action)
             env_info = env.get_env()
@@ -388,7 +452,7 @@ for episode in range(1, max_episodes+1):
             lidar_self = np.array(lidar_self)
             lidar_self = lidar_self[:][np.newaxis, :]
 
-            visual = (visual[np.newaxis, :] - (255 / 2)) / (255 / 2)
+            visual = visual[np.newaxis, :]
             state_deque.append(lidar_self)
             visual_deque.append(visual)
 
@@ -415,13 +479,19 @@ for episode in range(1, max_episodes+1):
             success_times += 1
         episode_reward_list.append(episode_reward)
         print('episode %d ends with reward %f' % (episode, episode_reward))
+    plt.plot(episode_reward_list)
+    plt.xlabel('episode')
+    plt.ylabel('reward')
+    plt.show()
+    plt.savefig('%s/reward' % time)
+    log_information()
 
-    elif mode == 'test':
-        load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
-        load_model_path2 = '2019-11-01 21:00:29/final target network parameters'
-        # agent.load_model()
-        # os.mkdir(time)
 
+elif mode == 'test':
+    load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
+    load_model_path2 = '2019-11-01 21:00:29/final target network parameters'
+    agent.load_model()
+    for episode in range(1, max_episodes + 1):
         # use deque to stack
         state_deque = deque(maxlen=4)
         visual_deque = deque(maxlen=4)
@@ -443,17 +513,17 @@ for episode in range(1, max_episodes+1):
         lidar_self = lidar_self[:][np.newaxis, :]
 
         # visual: 1x80x80 np.array
-        visual = (env_info[1][np.newaxis, :] - (255 / 2)) / (255 / 2)
+        visual = env_info[1][np.newaxis, :]
 
         done, reward = env_info[2], env_info[3]
 
         # initialize the first state
-        for i in range(4):
+        for i in range(n_fram_stack):
             visual_deque.append(visual)
         # 4x80x80  np.array
         visual_state = np.concatenate((visual_deque[0], visual_deque[1], visual_deque[2], visual_deque[3]), axis=0)
 
-        for i in range(4):
+        for i in range(n_fram_stack):
             state_deque.append(lidar_self)
         # 4x724  np.array
         lidar_self_state = np.concatenate((state_deque[0], state_deque[1], state_deque[2], state_deque[3]), axis=0)
@@ -465,6 +535,7 @@ for episode in range(1, max_episodes+1):
             v_cmd = float(action[0][0].asnumpy())
             w_cmd = float(action[0][1].asnumpy())
             action = [v_cmd, w_cmd]
+            episode_steps += 1
 
             env.step(action)
             env_info = env.get_env()
@@ -475,7 +546,7 @@ for episode in range(1, max_episodes+1):
             lidar_self = np.array(lidar_self)
             lidar_self = lidar_self[:][np.newaxis, :]
 
-            visual = (visual[np.newaxis, :] - (255 / 2)) / (255 / 2)
+            visual = visual[np.newaxis, :]
             state_deque.append(lidar_self)
             visual_deque.append(visual)
 
@@ -494,14 +565,10 @@ for episode in range(1, max_episodes+1):
             success_times += 1
         episode_reward_list.append(episode_reward)
         print('episode %d ends with reward %f' % (episode, episode_reward))
-
-
-plt.plot(episode_reward_list)
-plt.xlabel('episode')
-plt.ylabel('reward')
-plt.savefig('%s/reward' % time)
-
-
+    plt.plot(episode_reward_list)
+    plt.xlabel('episode')
+    plt.ylabel('reward')
+    plt.show()
 
 
 

@@ -362,6 +362,9 @@ class envmodel():
                     self.done_list = True  # 终止
                     break
 
+        # if hit the wall
+
+
         env_info.append(self.done_list)
 
         self.r = self.getreward()
