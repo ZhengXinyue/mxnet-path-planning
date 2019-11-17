@@ -347,14 +347,14 @@ def get_initial_coordinate():
 
 
 time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
-os.mkdir(time)
+# os.mkdir(time)
 load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
 load_model_path2 = '2019-11-01 21:00:29/final target network parameters'
 # agent.load_model()
 target_reward = 1
 d = 15    # the distance from start point to goal point
 max_episode_steps = 200
-max_episodes = 500
+max_episodes = 1000
 
 for episode in range(max_episodes):
     agent.episode = episode

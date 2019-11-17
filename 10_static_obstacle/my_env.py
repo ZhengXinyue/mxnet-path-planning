@@ -30,7 +30,7 @@ import datetime
 import cv2
 from cv_bridge import CvBridge, CvBridgeError
 
-MAXENVSIZE = 30.0  # 边长为30的正方形作为环境的大小
+MAXENVSIZE = 20.0  # 边长为30的正方形作为环境的大小
 MAXLASERDIS = 10.0  # 雷达最大的探测距离
 Image_matrix = []
 
