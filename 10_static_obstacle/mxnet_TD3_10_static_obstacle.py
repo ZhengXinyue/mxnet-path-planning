@@ -292,19 +292,12 @@ mx.random.seed(seed)
 episode = 0
 episode_reward_list = []
 cmd = [0.0, 0.0]    # command for navigate (v, w)
-initialized = False
 time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
-
-
 mode = 'train'
-load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
-load_model_path2 = '2019-11-01 21:00:29/final target network parameters'
-# agent.load_model()
 d = 15    # the distance from start point to goal point
 max_episode_steps = 300
 max_episodes = 500
 target_reward = 1
-# os.mkdir(time)
 agent = TD3(action_dim=2,
             action_bound=[[-1, 1], [-1, 1]],
             actor_learning_rate=0.001,
@@ -323,20 +316,68 @@ agent = TD3(action_dim=2,
 
 for episode in range(1, max_episodes+1):
     if mode == 'train':
-        pass
+        # os.mkdir(time)
+        if episode % 50 == 0:
+            agent.save_model()
+
+        # use deque to stack
+        state_deque = deque(maxlen=4)
+        visual_deque = deque(maxlen=4)
+
+        episode_steps = 0
+        episode_reward = 0
+        start_end_point = get_initial_coordinate()
+        env.reset_env(start=[start_end_point[0][0], start_end_point[0][1]],
+                      goal=[0, 0])
+        # env.reset_env(start=[start_end_point[0][0], start_end_point[0][1]],
+        # goal=[start_end_point[1][0], start_end_point[1][1]])
+
+        env_info = env.get_env()
+
+        # lidar_state: 724 np.array
+        lidar_self = np.array(env_info[0])
+        # get lidar information or self state information using slice
+        # 1x724 np.array
+        lidar_self = lidar_self[:][np.newaxis, :]
+
+        # visual: 1x80x80 np.array
+        visual = (env_info[1][np.newaxis, :] - (255 / 2)) / (255 / 2)
+
+        terminal, reward = env_info[2], env_info[3]
+
+        # initialize the first state
+        for i in range(4):
+            visual_deque.append(visual)
+        # 4x80x80  np.array
+        visual_state = np.concatenate((visual_deque[0], visual_deque[1], visual_deque[2], visual_deque[3]), axis=0)
+
+        for i in range(4):
+            state_deque.append(lidar_self)
+        # 4x724  np.array
+        lidar_self_state = np.concatenate((state_deque[0], state_deque[1], state_deque[2], state_deque[3]), axis=0)
+        # 1x2896 np.array
+        lidar_self_state = lidar_self_state.reshape(1, -1)
+
+        # initialize the network parameters with one forward
+        m = nd.array([visual_state], ctx=ctx)
+        n = nd.array([lidar_self_state], ctx=ctx).flatten()
+        action = agent.main_actor_network(m, n)
+        agent.target_actor_network(m, n)
 
 
 
+        episode_steps += 1
 
-
-
-
+        while True:
+            if agent.total_steps < agent.explore_steps:
 
 
 
 
     elif mode == 'test':
-        pass
+        load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
+        load_model_path2 = '2019-11-01 21:00:29/final target network parameters'
+        # agent.load_model()
 
 
 

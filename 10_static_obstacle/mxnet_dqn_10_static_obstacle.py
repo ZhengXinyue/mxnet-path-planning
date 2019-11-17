@@ -383,7 +383,7 @@ for episode in range(max_episodes):
     # initialize the first state
     for i in range(4):
         visual_deque.append(visual)
-    # 4x3x3  np.array
+    # 4x80x80  np.array
     visual_state = np.concatenate((visual_deque[0], visual_deque[1], visual_deque[2], visual_deque[3]), axis=0)
     for i in range(4):
         state_deque.append(self_state)
