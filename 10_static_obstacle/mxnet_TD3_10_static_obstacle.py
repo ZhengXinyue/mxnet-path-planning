@@ -182,6 +182,7 @@ class TD3:
         visual = nd.array([visual], ctx=self.ctx)
         lidar = nd.array([lidar], ctx=self.ctx).flatten()
         action = self.main_actor_network(visual, lidar)
+        print(action)
         # no noise clip
         noise = nd.normal(loc=0, scale=self.explore_noise, shape=action.shape, ctx=self.ctx)
         action += noise
@@ -233,8 +234,8 @@ class TD3:
             # get current q value
             current_q_value1 = self.main_critic_network1(visual_state_batch, lidar_self_state_batch, action_batch)
             current_q_value2 = self.main_critic_network2(visual_state_batch, lidar_self_state_batch, action_batch)
-            loss = gloss.L2Loss()
 
+            loss = gloss.L2Loss()
             value_loss1 = loss(current_q_value1, target_q_value.detach())
             value_loss2 = loss(current_q_value2, target_q_value.detach())
             value_loss = value_loss1 + value_loss2
@@ -337,7 +338,7 @@ def log_information():
                  success_times,
                  n_fram_stack))
 
-    with open('%s/test.txt' % time, 'a+') as f:
+    with open('%s/training log.txt' % time, 'a+') as f:
         f.write('reward list:\n' + str(episode_reward_list) + '\n')
 
 
@@ -363,27 +364,28 @@ n_fram_stack = 4
 mode = 'train'
 d = 15    # the distance from start point to goal point
 max_episode_steps = 300
-max_episodes = 200
+max_episodes = 1000
 target_reward = 1
 agent = TD3(action_dim=2,
             action_bound=[[0, 1], [-1, 1]],
-            actor_learning_rate=0.0001,
-            critic_learning_rate=0.0001,
+            actor_learning_rate=0.00001,
+            critic_learning_rate=0.00001,
             batch_size=64,
             memory_size=100000,
             gamma=0.99,
             tau=0.005,
-            explore_steps=1000,
+            explore_steps=10000,
             policy_update=2,
             policy_noise=0.2,
-            explore_noise=0.2,
-            noise_clip=0.5,
-            grad_clip=1,
+            explore_noise=0.3,
+            noise_clip=0.3,
+            grad_clip=100,
             ctx=ctx
             )
 
 
 if mode == 'train':
+    load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
     os.mkdir(time)
     for episode in range(1, max_episodes+1):
         agent.episode += 1
@@ -482,8 +484,8 @@ if mode == 'train':
     plt.plot(episode_reward_list)
     plt.xlabel('episode')
     plt.ylabel('reward')
-    plt.show()
     plt.savefig('%s/reward' % time)
+    plt.show()
     log_information()
 
 
