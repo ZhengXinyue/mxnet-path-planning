@@ -362,14 +362,14 @@ episode_reward_list = []
 time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
 n_fram_stack = 4
 mode = 'train'
-d = 15    # the distance from start point to goal point
+d = 10    # the distance from start point to goal point
 max_episode_steps = 300
 max_episodes = 1000
 target_reward = 1
 agent = TD3(action_dim=2,
             action_bound=[[0, 1], [-1, 1]],
-            actor_learning_rate=0.00001,
-            critic_learning_rate=0.00001,
+            actor_learning_rate=0.0001,
+            critic_learning_rate=0.0001,
             batch_size=64,
             memory_size=100000,
             gamma=0.99,

@@ -50,7 +50,7 @@ class Dueling_network(gluon.nn.Block):
         self.v_dense2 = nn.Dense(1)
 
     def forward(self, visual, self_state):
-        feature = nd.flatten(self.conv2(self.conv1(self.conv0(visual))))
+        feature = nd.flatten(self.conv2(self.conv1(self.conv0(visual / 255))))
         # 2896 + 6400
         input = nd.concat(feature, self_state, dim=1)
         # batch_size x n_actions
@@ -323,7 +323,7 @@ cmd = [0.0, 0.0]    # command for navigate (v, w)
 initialized = False
 success_times = 0
 agent = D3QN_PER(n_actions=len(action_dict),
-                 explore_steps=10000,
+                 explore_steps=1000,
                  clip_theta=10,
                  learning_rate=0.0005,
                  init_epsilon=1,
@@ -347,14 +347,14 @@ def get_initial_coordinate():
 
 
 time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
-# os.mkdir(time)
+os.mkdir(time)
 load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
 load_model_path2 = '2019-11-01 21:00:29/final target network parameters'
 # agent.load_model()
 target_reward = 1
-d = 15    # the distance from start point to goal point
+d = 10    # the distance from start point to goal point
 max_episode_steps = 200
-max_episodes = 1000
+max_episodes = 500
 
 for episode in range(max_episodes):
     agent.episode = episode
@@ -376,7 +376,7 @@ for episode in range(max_episodes):
 
     # lidar: 724  list
     # visual: 80x80  np.array
-    lidar, visual = np.array(env_info[0]), (env_info[1][np.newaxis, :] - (255 / 2)) / (255 / 2)
+    lidar, visual = np.array(env_info[0]), env_info[1][np.newaxis, :]
     # self state 1 x 724
     self_state = lidar[:][np.newaxis, :]
     terminal, reward = env_info[2], env_info[3]
@@ -413,7 +413,7 @@ for episode in range(max_episodes):
         lidar, visual, terminal, reward = env_info[0], env_info[1], env_info[2], env_info[3]
         lidar = np.array(lidar)
         self_state = lidar[:][np.newaxis, :]
-        visual = (np.array(visual)[np.newaxis, :] - (255 / 2)) / (255 / 2)
+        visual = np.array(visual)[np.newaxis, :]
         state_deque.append(self_state)
         visual_deque.append(visual)
 

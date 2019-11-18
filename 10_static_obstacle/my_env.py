@@ -55,7 +55,7 @@ class envmodel():
         # 障碍数量
         self.num_obs = 10
 
-        self.dis = 1.0  # 位置精度-->判断是否到达目标的距离
+        self.dis = 1.2  # 位置精度-->判断是否到达目标的距离
 
         self.obs_pos = []  # 障碍物的位置信息
 
@@ -168,6 +168,10 @@ class envmodel():
         if self.d < self.dis:
             reward = reward + 1
             print("Goal point!!!!!!!!!!!!!!!!!!!!")
+
+        # hit the wall
+        if self.robotstate[0] > 10.5 or self.robotstate[0] < -10.5 or self.robotstate[1] > 10.5 or self.robotstate[1] < -10.5:
+            reward = reward - 0.5
 
         # 碰撞障碍物有负的奖励
         for i in range(self.num_obs):
@@ -363,7 +367,11 @@ class envmodel():
                     break
 
         # if hit the wall
-
+        x, y = self.robotstate[0], self.robotstate[1]
+        if self.done_list == False:
+            if x > 10.5 or x < -10.5 or y > 10.5 or y < -10.5:
+                print("hit the wall")
+                self.done_list = True
 
         env_info.append(self.done_list)
 
