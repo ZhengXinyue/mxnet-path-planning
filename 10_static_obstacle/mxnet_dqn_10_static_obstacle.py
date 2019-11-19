@@ -323,15 +323,15 @@ cmd = [0.0, 0.0]    # command for navigate (v, w)
 initialized = False
 success_times = 0
 agent = D3QN_PER(n_actions=len(action_dict),
-                 explore_steps=1000,
+                 explore_steps=100,
                  clip_theta=10,
                  learning_rate=0.0005,
                  init_epsilon=1,
                  final_epsilon=0.05,
                  gamma=0.99,
-                 buffer_size=5000,
+                 buffer_size=10000,
                  batch_size=64,
-                 replace_iter=500,
+                 replace_iter=1000,
                  annealing_end=10000,
                  tau=0.001,
                  ctx=ctx)
@@ -354,11 +354,11 @@ load_model_path2 = '2019-11-01 21:00:29/final target network parameters'
 target_reward = 1
 d = 10    # the distance from start point to goal point
 max_episode_steps = 200
-max_episodes = 500
+max_episodes = 1000
 
 for episode in range(max_episodes):
     agent.episode = episode
-    if episode > 0 and episode % 50 == 0:
+    if episode > 0 and episode % 100 == 0:
         agent.save_model()
     episode_steps = 0
     episode_reward = 0
@@ -499,3 +499,4 @@ plt.plot(episode_reward_list)
 plt.xlabel('episode')
 plt.ylabel('reward')
 plt.savefig('%s/reward' % time)
+plt.show()

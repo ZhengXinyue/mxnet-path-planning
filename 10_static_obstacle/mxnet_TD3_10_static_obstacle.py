@@ -70,18 +70,23 @@ class Actor(nn.Block):
         self.action_dim = action_dim
         self.action_bound = action_bound
 
-        self.conv0 = nn.Conv2D(32, kernel_size=8, strides=4, padding=2, activation='relu')
-        self.conv1 = nn.Conv2D(64, kernel_size=4, strides=2, padding=1, activation='relu')
-        self.conv2 = nn.Conv2D(64, kernel_size=3, strides=1, padding=1, activation='relu')
-        self.dense0 = nn.Dense(512, activation='relu')
-        self.dense1 = nn.Dense(128, activation='relu')
+        self.conv0 = nn.Conv2D(32, kernel_size=8, strides=4, padding=2)
+        self.bn0 = nn.BatchNorm()
+        self.conv1 = nn.Conv2D(64, kernel_size=4, strides=2, padding=1)
+        self.bn1 = nn.BatchNorm()
+        self.conv2 = nn.Conv2D(64, kernel_size=3, strides=1, padding=1)
+        self.bn2 = nn.BatchNorm()
+        self.dense0 = nn.Dense(512, activation='tanh')
+        self.dense1 = nn.Dense(128, activation='tanh')
         self.v_dense = nn.Dense(1, activation='sigmoid')
         self.w_dense = nn.Dense(1, activation='tanh')
 
     def forward(self, visual, lidar):
         visual = visual / 255
         # batch size x 6400
-        visual_feature = self.conv2(self.conv1(self.conv0(visual))).flatten()
+        v1 = nd.tanh(self.bn0(self.conv0(visual)))
+        v2 = nd.tanh(self.bn1(self.conv1(v1)))
+        visual_feature = nd.tanh(self.bn2(self.conv2(v2))).flatten()
         # batch size x (6400 + 724 x 4)
         dense_input = nd.concat(visual_feature, lidar, dim=1)
         m = self.dense1(self.dense0(dense_input))
@@ -97,16 +102,21 @@ class Critic(nn.Block):
     def __init__(self):
         super(Critic, self).__init__()
 
-        self.conv0 = nn.Conv2D(32, kernel_size=8, strides=4, padding=2, activation='relu')
-        self.conv1 = nn.Conv2D(64, kernel_size=4, strides=2, padding=1, activation='relu')
-        self.conv2 = nn.Conv2D(64, kernel_size=3, strides=1, padding=1, activation='relu')
-        self.dense0 = nn.Dense(512, activation='relu')
-        self.dense1 = nn.Dense(128, activation='relu')
+        self.conv0 = nn.Conv2D(32, kernel_size=8, strides=4, padding=2)
+        self.bn0 = nn.BatchNorm()
+        self.conv1 = nn.Conv2D(64, kernel_size=4, strides=2, padding=1)
+        self.bn1 = nn.BatchNorm()
+        self.conv2 = nn.Conv2D(64, kernel_size=3, strides=1, padding=1)
+        self.bn2 = nn.BatchNorm()
+        self.dense0 = nn.Dense(512, activation='tanh')
+        self.dense1 = nn.Dense(128, activation='tanh')
         self.dense2 = nn.Dense(1)
 
     def forward(self, visual, lidar, action):
         visual = visual / 255
-        visual_feature = self.conv2(self.conv1(self.conv0(visual))).flatten()
+        v1 = nd.tanh(self.bn0(self.conv0(visual)))
+        v2 = nd.tanh(self.bn1(self.conv1(v1)))
+        visual_feature = nd.tanh(self.bn2(self.conv2(v2))).flatten()
         # batch size x (6400 + 724 x 4 + 2)
         dense_input = nd.concat(visual_feature, lidar, action, dim=1)
         q_value = self.dense2(self.dense1(self.dense0(dense_input)))
@@ -196,9 +206,12 @@ class TD3:
         return action
 
     def action_clip(self, action):
-        action0 = nd.clip(action[:, 0], a_min=float(self.action_bound[0][0].asnumpy()), a_max=float(self.action_bound[0][1].asnumpy()))
-        action1 = nd.clip(action[:, 1], a_min=float(self.action_bound[1][0].asnumpy()), a_max=float(self.action_bound[1][1].asnumpy()))
-        clipped_action = nd.concat(action0.reshape(-1, 1), action1.reshape(-1, 1))
+        if len(action[0]) == 2:
+            action0 = nd.clip(action[:, 0], a_min=float(self.action_bound[0][0].asnumpy()), a_max=float(self.action_bound[0][1].asnumpy()))
+            action1 = nd.clip(action[:, 1], a_min=float(self.action_bound[1][0].asnumpy()), a_max=float(self.action_bound[1][1].asnumpy()))
+            clipped_action = nd.concat(action0.reshape(-1, 1), action1.reshape(-1, 1))
+        else:
+            clipped_action = nd.clip(action, a_min=float(self.action_bound[0][0].asnumpy()), a_max=float(self.action_bound[0][1].asnumpy()))
         return clipped_action
 
     def soft_update(self, target_network, main_network):
@@ -243,9 +256,9 @@ class TD3:
         self.main_critic_network2.collect_params().zero_grad()
         value_loss.backward()
         params1 = [p.data() for p in self.main_critic_network1.collect_params().values()]
-        gb.grad_clipping(params1, theta=self.grad_clip, ctx=self.ctx)
+        # grad_clipping(params1, theta=self.grad_clip, ctx=self.ctx)
         params2 = [p.data() for p in self.main_critic_network2.collect_params().values()]
-        gb.grad_clipping(params2, theta=self.grad_clip, ctx=self.ctx)
+        # grad_clipping(params2, theta=self.grad_clip, ctx=self.ctx)
         self.critic1_optimizer.step(self.batch_size)
         self.critic2_optimizer.step(self.batch_size)
 
@@ -258,7 +271,7 @@ class TD3:
             self.main_actor_network.collect_params().zero_grad()
             actor_loss.backward()
             params3 = [p.data() for p in self.main_actor_network.collect_params().values()]
-            gb.grad_clipping(params3, theta=self.grad_clip, ctx=self.ctx)
+            # grad_clipping(params3, theta=self.grad_clip, ctx=self.ctx)
             self.actor_optimizer.step(1)
 
             self.soft_update(self.target_actor_network, self.main_actor_network)
@@ -293,6 +306,19 @@ class TD3:
             '%s/target critic network1 parameters at episode %d' % (time, self.episode))
         self.target_critic_network2.save_parameters(
             '%s/target critic network2 parameters at episode %d' % (time, self.episode))
+
+
+def grad_clipping(params, theta, ctx):
+    """Clip the gradient."""
+    if theta is not None:
+        norm = nd.array([0], ctx)
+        for param in params:
+            norm += (param.grad ** 2).sum()
+            print(norm)
+        norm = norm.sqrt().asscalar()
+        if norm > theta:
+            for param in params:
+                param.grad[:] *= theta / norm
 
 
 def log_information():
@@ -353,7 +379,7 @@ def get_initial_coordinate():
 
 ctx = mx.gpu()
 success_times = 0
-seed = 11111
+seed = 111111
 random.seed(seed)
 np.random.seed(seed)
 mx.random.seed(seed)
@@ -363,18 +389,18 @@ time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
 n_fram_stack = 4
 mode = 'train'
 d = 10    # the distance from start point to goal point
-max_episode_steps = 300
-max_episodes = 1000
+max_episode_steps = 150
+max_episodes = 500
 target_reward = 1
 agent = TD3(action_dim=2,
             action_bound=[[0, 1], [-1, 1]],
-            actor_learning_rate=0.0001,
-            critic_learning_rate=0.0001,
+            actor_learning_rate=0.000001,
+            critic_learning_rate=0.000001,
             batch_size=64,
             memory_size=100000,
             gamma=0.99,
             tau=0.005,
-            explore_steps=10000,
+            explore_steps=100,
             policy_update=2,
             policy_noise=0.2,
             explore_noise=0.3,
@@ -389,7 +415,7 @@ if mode == 'train':
     os.mkdir(time)
     for episode in range(1, max_episodes+1):
         agent.episode += 1
-        if episode % 50 == 0:
+        if episode % 100 == 0:
             agent.save_model()
 
         # use deque to stack
@@ -432,20 +458,34 @@ if mode == 'train':
 
         while True:
             if agent.total_steps < agent.explore_steps:
-                v_cmd = random.uniform(0, 1)
-                w_cmd = random.uniform(-1, 1)
-                action = [v_cmd, w_cmd]
+                if agent.action_dim == 2:
+                    v_cmd = random.uniform(0, 1)
+                    w_cmd = random.uniform(-1, 1)
+                    action = [v_cmd, w_cmd]
+                    env.step(action)
+                else:
+                    v_cmd = 0.5
+                    w_cmd = random.uniform(-1, 1)
+                    action = [w_cmd]
+                    env.step([v_cmd, action[0]])
                 agent.total_steps += 1
                 episode_steps += 1
             else:
-                action = agent.choose_action_train(visual_state, lidar_self_state)
-                v_cmd = float(action[0].asnumpy())
-                w_cmd = float(action[1].asnumpy())
-                action = [v_cmd, w_cmd]
+                if agent.action_dim == 2:
+                    action = agent.choose_action_train(visual_state, lidar_self_state)
+                    v_cmd = float(action[0].asnumpy())
+                    w_cmd = float(action[1].asnumpy())
+                    action = [v_cmd, w_cmd]
+                    env.step(action)
+                else:
+                    action = agent.choose_action_train(visual_state, lidar_self_state)
+                    v_cmd = 0.5
+                    w_cmd = float(action[0].asnumpy())
+                    action = [w_cmd]
+                    env.step([v_cmd, action[0]])
                 agent.total_steps += 1
                 episode_steps += 1
 
-            env.step(action)
             env_info = env.get_env()
             lidar_self, visual, done, reward = env_info[0], env_info[1], env_info[2], env_info[3]
             episode_reward += reward
