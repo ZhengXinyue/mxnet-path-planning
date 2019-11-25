@@ -412,7 +412,7 @@ agent = TD3(action_dim=2,
 
 if mode == 'train':
     load_model_path1 = '2019-11-01 21:00:29/final main network parameters'
-    os.mkdir(time)
+    # os.mkdir(time)
     for episode in range(1, max_episodes+1):
         agent.episode += 1
         if episode % 100 == 0:

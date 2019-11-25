@@ -158,15 +158,15 @@ class envmodel():
 
         # 假如上一时刻到目标的距离<这一时刻到目标的距离就会有负的奖励
         if self.d_last < self.d:
-            reward = reward - 0.3 * (self.d - self.d_last)
+            reward = reward - 10 * (self.d - self.d_last)
 
         if self.d_last >= self.d:
-            reward = reward + 0.3 * (self.d_last - self.d)
+            reward = reward + 10 * (self.d_last - self.d)
 
 
         # 到达目标点有正的奖励
         if self.d < self.dis:
-            reward = reward + 1
+            reward = reward + 20
             print("Goal point!!!!!!!!!!!!!!!!!!!!")
 
         # hit the wall
@@ -177,7 +177,7 @@ class envmodel():
         for i in range(self.num_obs):
             if math.sqrt((self.robotstate[0] - self.obs_pos[i][0]) ** 2 + (
                     self.robotstate[1] - self.obs_pos[i][1]) ** 2) < 1.5:
-                reward = reward - 0.5
+                reward = reward - 1
                 print("Obstacle!!!!!")
                 break
 
@@ -303,6 +303,10 @@ class envmodel():
         yp = -dx * math.sin(self.robotstate[4]) + dy * math.cos(self.robotstate[4])
         thet = math.atan2(yp, xp)
         selfstate[3] = thet / math.pi
+
+        # modified
+        selfstate[0] = self.robotstate[0]  # x
+        selfstate[1] = self.robotstate[1]  # y
 
         # input1-->雷达信息
         laser = []
